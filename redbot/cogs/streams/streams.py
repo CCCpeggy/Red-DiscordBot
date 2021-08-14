@@ -23,6 +23,7 @@ from .errors import (
 from . import streamtypes as _streamtypes
 
 import re
+import time
 import logging
 import asyncio
 import aiohttp
@@ -33,7 +34,7 @@ from typing import Optional, List, Tuple, Union, Dict
 
 _ = Translator("Streams", __file__)
 log = logging.getLogger("red.core.cogs.Streams")
-
+new_line = r'{new_line}'
 
 @cog_i18n(_)
 class Streams(commands.Cog):
@@ -60,7 +61,7 @@ class Streams(commands.Cog):
         "ignore_schedule": False,
     }
 
-    role_defaults = {"mention": False}
+    role_defaults = {"mention": []}
 
     def __init__(self, bot: Red):
         super().__init__()
@@ -596,16 +597,19 @@ class Streams(commands.Cog):
     @commands.guild_only()
     async def role(self, ctx: commands.Context, *, role: discord.Role):
         """Toggle a role mention."""
-        current_setting = await self.config.role(role).mention()
-        if current_setting:
-            await self.config.role(role).mention.set(False)
+        current_setting = list(await self.config.role(role).mention())
+        channel_id = ctx.channel.id
+        if channel_id in current_setting:
+            current_setting.remove(channel_id)
+            await self.config.role(role).mention.set(current_setting)
             await ctx.send(
                 _("`@\u200b{role.name}` will no longer be mentioned for stream alerts.").format(
                     role=role
                 )
             )
         else:
-            await self.config.role(role).mention.set(True)
+            current_setting.append(channel_id)
+            await self.config.role(role).mention.set(current_setting)
             msg = _(
                 "When a stream or community is live, `@\u200b{role.name}` will be mentioned."
             ).format(role=role)
@@ -720,11 +724,29 @@ class Streams(commands.Cog):
         *,
         is_schedule: bool = False,
     ):
-        m = await channel.send(
-            content,
-            embed=embed,
-            allowed_mentions=discord.AllowedMentions(roles=True, everyone=True),
-        )
+        if content == None:
+            m = await channel.send(
+                None,
+                embed=embed,
+                allowed_mentions=discord.AllowedMentions(roles=True, everyone=True),
+            )
+        else:
+            content = content.split(new_line)
+            if len(content) == 1:
+                m = await channel.send(
+                    content[0],
+                    embed=embed,
+                    allowed_mentions=discord.AllowedMentions(roles=True, everyone=True),
+                )
+            else:
+                for c in content:
+                    print(c)
+                    m = await channel.send(
+                        c,
+                        # embed=embed,
+                        allowed_mentions=discord.AllowedMentions(roles=True, everyone=True),
+                    )
+                    time.sleep(3)
         message_data = {"guild": m.guild.id, "channel": m.channel.id, "message": m.id}
         if is_schedule:
             message_data["is_schedule"] = True
@@ -814,6 +836,8 @@ class Streams(commands.Cog):
                                     "{stream.display_name}", str(stream.display_name)
                                 )
                                 content = content.replace("{stream}", str(stream.name))
+                                url = str(embed.url).replace("youtube", "www.youtube")
+                                content = content.replace("{url}", url)
                                 content = content.replace("{mention}", mention_str)
                             else:
                                 content = _("{mention}, {display_name} is live!").format(
@@ -837,6 +861,8 @@ class Streams(commands.Cog):
                                     "{stream.display_name}", str(stream.display_name)
                                 )
                                 content = content.replace("{stream}", str(stream.name))
+                                url = str(embed.url).replace("youtube", "www.youtube")
+                                content = content.replace("{url}", url)
                             else:
                                 content = _("{display_name} is live!").format(
                                     display_name=escape(
@@ -874,7 +900,7 @@ class Streams(commands.Cog):
         can_manage_roles = guild.me.guild_permissions.manage_roles
         can_mention_everyone = channel.permissions_for(guild.me).mention_everyone
         for role in guild.roles:
-            if await self.config.role(role).mention():
+            if channel.id in await self.config.role(role).mention():
                 if not can_mention_everyone and can_manage_roles and not role.mentionable:
                     try:
                         await role.edit(mentionable=True)
